@@ -37,6 +37,9 @@ os.makedirs(PROGRESS_FILE_DIR, exist_ok=True)
 # General settings
 SHOW_ERRORS_ON_EXIT = True
 
+# Word lookup uses English definitions. Translation is opt-in via --translate-to.
+DICTIONARY_TRANSLATION_LANGUAGE = None
+
 # PDF parsing settings
 PDF_FILTERS_ENABLED = False  # You can also enable this with the --filter or -f command-line option
 PDF_FILTER_HEADERS = True  # Filter headers in top margin of pages

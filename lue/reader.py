@@ -301,7 +301,9 @@ class Lue:
 
     async def _perform_dictionary_lookup(self, word):
         try:
-            result = await asyncio.to_thread(dictionary.lookup_word, word)
+            result = await asyncio.to_thread(
+                dictionary.lookup_word, word, config.DICTIONARY_TRANSLATION_LANGUAGE
+            )
             self.dictionary_result = result
             self.dictionary_error = None
         except Exception as exc:

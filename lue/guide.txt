@@ -30,7 +30,7 @@ There are two levels of text highlighting to help you follow along with the narr
 
 Chapter 7: In-App Dictionary
 
-When you want a quick lookup without leaving Lue, press "d" to see the meaning, IPA, and Turkish translation of the current word in a panel. Press "o" to hear the word pronounced aloud using a neural text-to-speech voice, right inside the app.
+Press "d" to see the current word's English definitions, IPA and example sentences. Press "o" to hear it pronounced. To add a translation, start Lue with --translate-to followed by your language code, for example --translate-to de or --translate-to tr.
 
 
 Chapter 8: Ending the Session

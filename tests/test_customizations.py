@@ -1,12 +1,14 @@
 """Regression checks for the additions in this fork. No network calls."""
 
 import asyncio
+import json
 import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 # Imports must not read or write the reader's real cache or word history.
 _sandbox = tempfile.TemporaryDirectory(prefix="lue-tests-")
@@ -46,31 +48,101 @@ class DictionaryTests(unittest.TestCase):
             "responseStatus": 200,
             "responseData": {"translatedText": "kitap"},
         }):
-            self.assertEqual(dictionary._fetch_tr_translation("book"), "kitap")
+            self.assertEqual(dictionary._fetch_translation("book", "tr"), "kitap")
 
     def test_provider_error_is_not_shown_as_a_translation(self):
         with patch.object(dictionary, "_fetch_json", return_value={
             "responseStatus": 429,
             "responseData": {"translatedText": "Daily limit exceeded"},
         }):
-            self.assertIsNone(dictionary._fetch_tr_translation("book"))
+            self.assertIsNone(dictionary._fetch_translation("book", "tr"))
+
+    def test_translation_request_uses_selected_language(self):
+        with patch.object(dictionary, "_fetch_json", return_value={
+            "responseStatus": 200, "responseData": {"translatedText": "Buch"},
+        }) as fetch:
+            self.assertEqual(dictionary._fetch_translation("book", "de"), "Buch")
+        self.assertEqual(parse_qs(urlparse(fetch.call_args.args[0]).query)["langpair"], ["en|de"])
+
+    def test_default_lookup_does_not_contact_translation_service(self):
+        with patch.object(dictionary, "_fetch_dictionary", return_value={
+            "ipa": "/bʊk/", "meanings": [dictionary.Meaning("noun", "A written work.")],
+        }), patch.object(dictionary, "_fetch_translation") as translate:
+            result = dictionary.lookup_word("book")
+        translate.assert_not_called()
+        self.assertIsNone(result.translation)
+        self.assertIsNone(result.translation_language)
+        self.assertEqual(result.meanings[0].definition, "A written work.")
+
+    def test_each_translation_has_its_own_cache_entry(self):
+        with patch.object(dictionary, "_fetch_dictionary", return_value={
+            "meanings": [dictionary.Meaning("noun", "A written work.")],
+        }) as definitions, patch.object(dictionary, "_fetch_translation", side_effect=["Buch", "kitap"]) as translate:
+            german = dictionary.lookup_word("book", "DE")
+            turkish = dictionary.lookup_word("book", "tr")
+            english = dictionary.lookup_word("book")
+            self.assertEqual(dictionary.lookup_word("book", "de"), german)
+        definitions.assert_called_once()
+        self.assertEqual(translate.call_count, 2)
+        self.assertEqual(german.translation, "Buch")
+        self.assertEqual(turkish.translation, "kitap")
+        self.assertIsNone(english.translation)
+
+    def test_old_turkish_cache_is_preserved_without_changing_default(self):
+        Path(dictionary.CACHE_FILE).write_text(json.dumps({"book": {
+            "word": "book", "ipa": "/bʊk/", "translation_tr": "kitap",
+            "meanings": [{"part_of_speech": "noun", "definition": "A written work."}],
+        }}))
+        dictionary._load_disk_cache()
+        with patch.object(dictionary, "_fetch_json", side_effect=AssertionError("Network called")):
+            self.assertIsNone(dictionary.lookup_word("book").translation)
+            self.assertEqual(dictionary.lookup_word("book", "tr").translation, "kitap")
+
+    def test_old_translation_only_entry_is_not_an_english_definition(self):
+        Path(dictionary.CACHE_FILE).write_text(json.dumps({"word": {
+            "word": "word", "translation_tr": "kelime", "meanings": [],
+        }}))
+        dictionary._load_disk_cache()
+        with patch.object(dictionary, "_fetch_dictionary", return_value=None):
+            with self.assertRaises(LookupError):
+                dictionary.lookup_word("word")
+            self.assertEqual(dictionary.lookup_word("word", "tr").translation, "kelime")
+
+    def test_translation_failure_keeps_definitions_and_retries_later(self):
+        with patch.object(dictionary, "_fetch_dictionary", return_value={
+            "meanings": [dictionary.Meaning("noun", "A written work.")],
+        }), patch.object(dictionary, "_fetch_translation", side_effect=[None, "Buch"]):
+            first = dictionary.lookup_word("book", "de")
+            second = dictionary.lookup_word("book", "de")
+        self.assertTrue(first.meanings)
+        self.assertIsNone(first.translation)
+        self.assertEqual(second.translation, "Buch")
+
+    def test_language_code_validation(self):
+        self.assertEqual(dictionary.normalize_translation_language(" PT-BR "), "pt-br")
+        self.assertIsNone(dictionary.normalize_translation_language("none"))
+        self.assertIsNone(dictionary.normalize_translation_language("en"))
+        for value in ["", "German", "en|de", "../de"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                dictionary.normalize_translation_language(value)
 
     def test_disk_cache_survives_restart_and_works_offline(self):
         definition = {"ipa": "/bʊk/", "meanings": [dictionary.Meaning("noun", "A written work.")]}
         with patch.object(dictionary, "_fetch_dictionary", return_value=definition), \
-             patch.object(dictionary, "_fetch_tr_translation", return_value="kitap"):
-            first = dictionary.lookup_word("Book")
+             patch.object(dictionary, "_fetch_translation", return_value="kitap"):
+            first = dictionary.lookup_word("Book", "tr")
         dictionary._CACHE.clear()
         dictionary._load_disk_cache()
         with patch.object(dictionary, "_fetch_json", side_effect=AssertionError("Network called")):
-            self.assertEqual(dictionary.lookup_word("“BOOK”"), first)
+            self.assertEqual(dictionary.lookup_word("“BOOK”", "tr"), first)
+            self.assertIsNone(dictionary.lookup_word("Book").translation)
 
     def test_missing_result_does_not_poison_cache(self):
         with patch.object(dictionary, "_fetch_dictionary", return_value=None), \
-             patch.object(dictionary, "_fetch_tr_translation", return_value=None):
+             patch.object(dictionary, "_fetch_translation", return_value=None):
             with self.assertRaises(LookupError):
                 dictionary.lookup_word("missing")
-        self.assertNotIn("missing", dictionary._CACHE)
+        self.assertFalse(dictionary._CACHE)
 
 
 class WordHistoryTests(unittest.TestCase):

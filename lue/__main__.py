@@ -17,7 +17,7 @@ except ImportError:
     from importlib_resources import files
 from rich.console import Console
 from .reader import Lue
-from . import config, progress_manager, input_handler
+from . import config, progress_manager, input_handler, dictionary
 from .tts_manager import TTSManager, get_default_tts_model_name
 
 def get_keyboard_shortcuts_file(keys_arg):
@@ -182,6 +182,14 @@ async def main():
         help="Visual layout mode: 0=minimal, 1=medium, 2=full, 3=speed reading",
     )
     
+    parser.add_argument(
+        "--translate-to",
+        type=dictionary.normalize_translation_language,
+        default=config.DICTIONARY_TRANSLATION_LANGUAGE,
+        metavar="LANG",
+        help="Add a translation to English word definitions (e.g. de, es, tr). Default: none",
+    )
+
     if available_tts:
         # Add "none" option to available TTS choices
         tts_choices = ["none"] + available_tts
@@ -210,6 +218,7 @@ async def main():
             help="Specify the language for the TTS model",
         )
     args = parser.parse_args(preprocessed_args)
+    config.DICTIONARY_TRANSLATION_LANGUAGE = args.translate_to
 
     # Initialize console early for printing messages
     console = Console()

@@ -846,8 +846,8 @@ def render_dictionary_overlay(reader, width, height):
         result = reader.dictionary_result
         if result.ipa:
             body.append(f"IPA: {result.ipa}\n", style="bold magenta")
-        if result.translation_tr:
-            body.append(f"TR: {result.translation_tr}\n", style="bold green")
+        if result.translation and result.translation_language:
+            body.append(f"{result.translation_language.upper()}: {result.translation}\n", style="bold green")
         if result.meanings:
             body.append("\n", style=COLORS.TEXT_NORMAL)
             for idx, meaning in enumerate(result.meanings[:4], start=1):
