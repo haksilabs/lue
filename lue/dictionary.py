@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 import json
 import os
-import re
 from typing import Any
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -87,12 +86,7 @@ _load_disk_cache()
 
 
 def normalize_word(raw_word: str) -> str:
-    return (
-        raw_word.strip()
-        .strip("\"'`()[]{}<>,.:;!?/\\|*_+=~")
-        .strip("-–—")
-        .lower()
-    )
+    return raw_word.strip().strip("\"'‘’“”«»`()[]{}<>,.:;!?/\\|*_+=~-–—").lower()
 
 
 def lookup_word(raw_word: str) -> WordLookupResult:
@@ -177,6 +171,9 @@ def _fetch_tr_translation(word: str) -> str | None:
     except Exception:
         return None
 
+    if not isinstance(payload, dict) or str(payload.get("responseStatus", 200)) != "200":
+        return None
+
     translated = (
         payload.get("responseData", {}).get("translatedText", "").strip()
         if isinstance(payload, dict)
@@ -186,8 +183,4 @@ def _fetch_tr_translation(word: str) -> str | None:
         return None
     if normalize_word(translated) == normalize_word(word):
         return None
-    if re.fullmatch(r"[A-Za-z\-\s']+", translated):
-        # Likely untranslated or poor result.
-        return None
     return translated
-

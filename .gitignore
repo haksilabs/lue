@@ -152,6 +152,10 @@ Desktop.ini
 data/
 *.mp3
 *.wav
+dictionary_cache.json
+word_history.json
+*.progress.json
+.env.*
 
 # IDE
 .vscode/

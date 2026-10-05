@@ -165,4 +165,3 @@ class ElevenlabsTTS(TTSBase):
         if not self.initialized:
             raise RuntimeError("ElevenLabs TTS has not been initialized.")
         await self.get_raw_timing_data(text, output_path)
-

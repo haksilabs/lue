@@ -103,4 +103,3 @@ def get_recent_words(limit: int = 15) -> list[WordEntry]:
     entries = load_entries()
     entries.sort(key=lambda e: e.last_seen, reverse=True)
     return entries[:limit]
-

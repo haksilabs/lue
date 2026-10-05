@@ -31,7 +31,7 @@ dependencies = [
     "PyMuPDF>=1.26.3",
     "Markdown>=3.8.2",
     "platformdirs>=4.3.8",
-    "edge-tts>=7.2.0",
+    "edge-tts>=7.2.7",
 ]
 
 [project.optional-dependencies]
@@ -45,9 +45,9 @@ kokoro = [
 lue = "lue.__main__:cli"
 
 [project.urls]
-Homepage = "https://github.com/paulilaaso/lue"
-Repository = "https://github.com/paulilaaso/lue"
-Issues = "https://github.com/paulilaaso/lue/issues"
+Homepage = "https://github.com/muhammetozkoc/lue"
+Repository = "https://github.com/muhammetozkoc/lue"
+Issues = "https://github.com/muhammetozkoc/lue/issues"
 
 [tool.setuptools.packages.find]
 include = ["lue*"]
