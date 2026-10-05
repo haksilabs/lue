@@ -9,8 +9,9 @@ from rich.console import Console
 from rich.text import Text
 import platformdirs
 
-from . import config, content_parser, progress_manager, audio, ui, input_handler
+from . import config, content_parser, progress_manager, audio, ui, input_handler, dictionary, word_history
 from .tts.base import TTSBase
+from .tts_manager import TTSManager
 
 class Lue:
     def __init__(self, file_path, tts_model: TTSBase | None, overlap: float | None = None):
@@ -61,6 +62,24 @@ class Lue:
         self.chapter_index_panel_y = 0
         self.chapter_index_panel_width = 0
         self.chapter_index_panel_height = 0
+
+        # Dictionary overlay state
+        self.show_dictionary_overlay = False
+        self.dictionary_lookup_word = None
+        self.dictionary_result = None
+        self.dictionary_error = None
+        self.dictionary_loading = False
+        self.dictionary_task = None
+
+        # Word history overlay state
+        self.show_word_history = False
+
+        # Dedicated TTS instance for one-off word pronunciation (independent
+        # of the main reading TTS, so it works even when reading TTS is off)
+        self._pronounce_tts = None
+        self._pronounce_tts_name = None
+        self._pronounce_tts_voice = None
+        self._tts_manager = TTSManager()
 
     def _initialize_tts(self, tts_model):
         """Initialize TTS-related state."""
@@ -247,6 +266,155 @@ class Lue:
         self._initial_load_complete = True
         self.subtitle_hitboxes = []
 
+    def _get_lookup_target_word(self):
+        """Get the best current word candidate for dictionary or pronunciation."""
+        selected_text = self._get_selected_text().strip()
+        if selected_text:
+            cleaned_selected = dictionary.normalize_word(selected_text)
+            if cleaned_selected and ' ' not in cleaned_selected:
+                return cleaned_selected
+
+        current_word = ui.get_current_word(self)
+        cleaned_word = dictionary.normalize_word(current_word)
+        if cleaned_word:
+            return cleaned_word
+
+        try:
+            paragraph = self.chapters[self.ui_chapter_idx][self.ui_paragraph_idx]
+            sentence = content_parser.split_into_sentences(paragraph)[self.ui_sentence_idx]
+        except (AttributeError, IndexError):
+            return None
+
+        for token in sentence.split():
+            cleaned_token = dictionary.normalize_word(token)
+            if cleaned_token:
+                return cleaned_token
+        return None
+
+    def _show_lookup_error(self, message):
+        self.show_dictionary_overlay = True
+        self.dictionary_lookup_word = self._get_lookup_target_word()
+        self.dictionary_result = None
+        self.dictionary_error = message
+        self.dictionary_loading = False
+        asyncio.create_task(ui.display_ui(self))
+
+    async def _perform_dictionary_lookup(self, word):
+        try:
+            result = await asyncio.to_thread(dictionary.lookup_word, word)
+            self.dictionary_result = result
+            self.dictionary_error = None
+        except Exception as exc:
+            self.dictionary_result = None
+            self.dictionary_error = str(exc)
+        finally:
+            self.dictionary_loading = False
+            asyncio.create_task(ui.display_ui(self))
+
+    async def _toggle_dictionary_overlay(self):
+        """Show/hide the in-app quick lookup panel (free dictionary sources)."""
+        if self.show_dictionary_overlay and not self.dictionary_loading:
+            self.show_dictionary_overlay = False
+            asyncio.create_task(ui.display_ui(self))
+            return
+
+        word = self._get_lookup_target_word()
+        self.show_dictionary_overlay = True
+        self.dictionary_lookup_word = word
+        self.dictionary_result = None
+        self.dictionary_error = None
+
+        if not word:
+            self.dictionary_loading = False
+            self.dictionary_error = "No word selected. Move the reading cursor or select a word first."
+            asyncio.create_task(ui.display_ui(self))
+            return
+
+        word_history.record_word(word, self.book_title)
+
+        self.dictionary_loading = True
+        asyncio.create_task(ui.display_ui(self))
+
+        if self.dictionary_task and not self.dictionary_task.done():
+            self.dictionary_task.cancel()
+
+        self.dictionary_task = asyncio.create_task(self._perform_dictionary_lookup(word))
+
+    async def _pronounce_current_word(self):
+        """Speak the current word aloud using the currently selected TTS backend."""
+        word = self._get_lookup_target_word()
+        if not word:
+            self._show_lookup_error("No word selected. Move the reading cursor or select a word first.")
+            return
+
+        word_history.record_word(word, self.book_title)
+
+        was_playing = not self.is_paused and self.tts_model
+        if was_playing:
+            self.is_paused = True
+            self._save_extended_progress()
+            await audio.stop_and_clear_audio(self)
+
+        preview_path = None
+        try:
+            model_name = self.tts_model.name if self.tts_model else config.DEFAULT_TTS_MODEL
+            model_voice = self.tts_voice or config.TTS_VOICES.get(model_name)
+
+            needs_new_model = (
+                self._pronounce_tts is None
+                or self._pronounce_tts_name != model_name
+                or self._pronounce_tts_voice != model_voice
+            )
+            if needs_new_model:
+                self._pronounce_tts = self._tts_manager.create_model(
+                    model_name, self.console, voice=model_voice, lang=None
+                )
+                self._pronounce_tts_name = model_name
+                self._pronounce_tts_voice = model_voice
+
+            if not self._pronounce_tts:
+                raise RuntimeError(f"Pronunciation engine '{model_name}' is unavailable.")
+
+            if not self._pronounce_tts.initialized:
+                ok = await self._pronounce_tts.initialize()
+                if not ok:
+                    raise RuntimeError(f"Pronunciation engine '{model_name}' failed to initialize.")
+
+            preview_path = os.path.join(
+                config.AUDIO_DATA_DIR, f"word_preview.{self._pronounce_tts.output_format}"
+            )
+            if os.path.exists(preview_path):
+                os.remove(preview_path)
+
+            await self._pronounce_tts.generate_audio(word, preview_path)
+
+            process = await asyncio.create_subprocess_exec(
+                'ffplay', '-nodisp', '-autoexit', '-loglevel', 'error', preview_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            await process.wait()
+        except FileNotFoundError:
+            self._show_lookup_error("ffplay not found. Install ffmpeg to hear pronunciation.")
+        except Exception as exc:
+            self._show_lookup_error(f"Pronunciation failed: {exc}")
+        finally:
+            if preview_path and os.path.exists(preview_path):
+                try:
+                    os.remove(preview_path)
+                except OSError:
+                    pass
+            if was_playing:
+                self.is_paused = False
+                if self.running:
+                    await audio.play_from_current_position(self)
+
+    async def _toggle_word_history(self):
+        self.show_word_history = not self.show_word_history
+        self.show_recent_menu = False
+        self.show_chapter_index = False
+        asyncio.create_task(ui.display_ui(self))
+
     async def initialize_tts(self) -> bool:
         """Initializes the selected TTS model."""
         if not self.tts_model:
@@ -424,6 +592,56 @@ class Lue:
             content_x = min(content_x, len(line_text))
         
         return (clicked_line, content_x)
+
+    def _find_word_at_click(self, click_x, click_y):
+        """Find the word (line_idx, start_char, end_char, word) at a click location."""
+        char_pos = self._find_char_position_at_click(click_x, click_y)
+        if not char_pos:
+            return None
+
+        line_idx, char_idx = char_pos
+        if line_idx >= len(self.document_lines):
+            return None
+
+        line_text = self.document_lines[line_idx].plain
+        if not line_text:
+            return None
+
+        char_idx = max(0, min(char_idx, len(line_text) - 1))
+
+        def is_word_char(ch):
+            return ch.isalnum() or ch in "'-"
+
+        if not is_word_char(line_text[char_idx]):
+            left = char_idx - 1
+            right = char_idx + 1
+            found = False
+            while left >= 0 or right < len(line_text):
+                if left >= 0 and is_word_char(line_text[left]):
+                    char_idx = left
+                    found = True
+                    break
+                if right < len(line_text) and is_word_char(line_text[right]):
+                    char_idx = right
+                    found = True
+                    break
+                left -= 1
+                right += 1
+            if not found:
+                return None
+
+        start = char_idx
+        while start > 0 and is_word_char(line_text[start - 1]):
+            start -= 1
+        end = char_idx
+        while end < len(line_text) - 1 and is_word_char(line_text[end + 1]):
+            end += 1
+
+        word = line_text[start:end + 1].strip("'-")
+        if not word:
+            return None
+
+        return (line_idx, start, end, word)
 
     def _is_click_on_text(self, click_x, click_y):
         """Check if click is on the text area."""
@@ -1221,7 +1439,7 @@ class Lue:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         
         # Cancel all tasks including pending restart task and pause toggle task
-        tasks_to_cancel = [self.smooth_scroll_task, self.ui_update_task, self.word_update_task, self.pending_restart_task, self.current_pause_toggle_task]
+        tasks_to_cancel = [self.smooth_scroll_task, self.ui_update_task, self.word_update_task, self.pending_restart_task, self.current_pause_toggle_task, self.dictionary_task]
         for task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
@@ -1307,6 +1525,7 @@ class Lue:
                 self.show_recent_menu = not self.show_recent_menu
                 if self.show_recent_menu:
                     self.show_chapter_index = False
+                    self.show_dictionary_overlay = False
                     self.recent_books_list = progress_manager.get_recent_books()
                     self.recent_menu_selection_idx = 0
                     # Pause TTS when menu opens
@@ -1324,6 +1543,7 @@ class Lue:
                 self.show_chapter_index = not self.show_chapter_index
                 if self.show_chapter_index:
                     self.show_recent_menu = False
+                    self.show_dictionary_overlay = False
                     self.chapter_index_selection_idx = self.chapter_idx
                     self._update_chapter_index_scroll()
                     if not self.is_paused:
@@ -1447,6 +1667,15 @@ class Lue:
                         self.current_word_timings = None
                         self.current_word_mapping = None
                 elif command_name == 'click_jump':
+                    word_hit = self._find_word_at_click(*data)
+                    if word_hit:
+                        line_idx, start_char, end_char, _word = word_hit
+                        self.selection_active = True
+                        self.selection_start = (line_idx, start_char)
+                        self.selection_end = (line_idx, end_char + 1)
+                    else:
+                        self._clear_selection()
+
                     if clicked_position := self._find_sentence_at_click(*data):
                         self.first_sentence_jump = False
                         self.chapter_idx, self.paragraph_idx, self.sentence_idx = clicked_position
@@ -1470,6 +1699,20 @@ class Lue:
                 continue
             
             if cmd == 'quit': break
+
+            if cmd == 'toggle_dictionary':
+                await self._toggle_dictionary_overlay()
+                continue
+
+            if cmd == 'pronounce_current_word':
+                await self._pronounce_current_word()
+                continue
+
+            if cmd == 'toggle_word_history':
+                await self._toggle_word_history()
+                continue
+
+
 
             if cmd == 'finish':
                 if self.player_task and not self.player_task.done():

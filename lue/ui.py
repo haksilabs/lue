@@ -1,7 +1,5 @@
-import asyncio
 import os
 import sys
-import platform
 import re
 from rich.console import Console
 from rich.text import Text
@@ -11,6 +9,7 @@ from rich.align import Align
 from rich import box
 from . import input_handler, config
 from . import content_parser
+from . import word_history
 
 # ================================
 # CENTRALIZED UI CONFIGURATION
@@ -76,6 +75,7 @@ class UIColors:
     TEXT_HIGHLIGHT = "bold magenta" # Current sentence highlight
     WORD_HIGHLIGHT = "bold yellow"  # Current word highlight
     WORD_HIGHLIGHT_STANDOUT = "black on bright_yellow"  # Standout mode word highlight
+
     SPEED_READING_TEXT = "bold white"  # Centered speed reading word
     SELECTION_HIGHLIGHT = "reverse" # Text selection highlight
     
@@ -103,6 +103,7 @@ class UIColors:
         cls.TEXT_HIGHLIGHT = "grey70"
         cls.WORD_HIGHLIGHT = "white"
         cls.WORD_HIGHLIGHT_STANDOUT = "black on white"
+
         cls.SPEED_READING_TEXT = "bold white"
         cls.SELECTION_HIGHLIGHT = "on grey50"
     
@@ -126,6 +127,7 @@ class UIColors:
         cls.TEXT_HIGHLIGHT = "grey30"
         cls.WORD_HIGHLIGHT = "black"
         cls.WORD_HIGHLIGHT_STANDOUT = "white on black"
+
         cls.SPEED_READING_TEXT = "bold black"
         cls.SELECTION_HIGHLIGHT = "on grey50"
     
@@ -273,13 +275,11 @@ def render_speed_reading_output(reader, width, height, console):
 
 
 def _apply_current_text_color(line):
-    """Apply the current theme's text color to a line."""
+    """Return the line as-is; per-word styles (e.g. difficult-word highlighting)
+    are already baked in at layout time and must not be collapsed here."""
     if not line.plain:
         return Text("", style=COLORS.TEXT_NORMAL)
-    
-    # Create a new Text object with current theme color
-    new_line = Text(line.plain, justify="left", no_wrap=False, style=COLORS.TEXT_NORMAL)
-    return new_line
+    return line
 
 
 def get_visible_content(reader):
@@ -315,15 +315,16 @@ def get_visible_content(reader):
 
         for sent_idx, sentence in enumerate(sentences):
             is_current_sentence = sent_idx == reader.ui_sentence_idx
+            tts_active = bool(getattr(reader, 'tts_model', None))
             
             # Determine the base style for this sentence
-            if is_current_sentence and config.SENTENCE_HIGHLIGHTING_ENABLED:
+            if is_current_sentence and config.SENTENCE_HIGHLIGHTING_ENABLED and tts_active:
                 base_style = COLORS.TEXT_HIGHLIGHT
             else:
                 base_style = COLORS.TEXT_NORMAL
             
             # Apply word-level highlighting if enabled and this is the current sentence
-            if (is_current_sentence and config.WORD_HIGHLIGHT_MODE > 0 and 
+            if (is_current_sentence and config.WORD_HIGHLIGHT_MODE > 0 and tts_active and
                 hasattr(reader, 'ui_word_idx')):
                 
                 # Preserve leading whitespace from the sentence, which contains paragraph indentation
@@ -551,10 +552,6 @@ def get_compact_subtitle(reader, width):
         auto_extra = 2 if auto_scroll_text == "AUTO" else 0
         auto_sep = base_sep + (ICONS.LINE_SEPARATOR_SHORT * auto_extra)
         
-        # Get UI mode display
-        ui_mode_names = ["MIN", "MED", "FULL", "SR"]
-        ui_mode_display = ui_mode_names[config.UI_MODE]
-        
         # Modified controls_text to remove ui_mode_text visual display but keep functionality
         controls_text = f"{nav_text_1} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_UP}[/{COLORS.CONTROL_ICONS}] {nav_text_2} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_DOWN}[/{COLORS.CONTROL_ICONS}] [{COLORS.SEPARATORS}]{base_sep}[/{COLORS.SEPARATORS}] {page_text} [{COLORS.ARROW_ICONS}]{ICONS.ROW_NAVIGATION}[/{COLORS.ARROW_ICONS}] {scroll_text} [{COLORS.ARROW_ICONS}]{ICONS.PAGE_NAVIGATION}[/{COLORS.ARROW_ICONS}] [{COLORS.SEPARATORS}]{base_sep}[/{COLORS.SEPARATORS}] {quit_text} [{COLORS.QUIT_ICON}]{ICONS.QUIT}[/{COLORS.QUIT_ICON}]"
         
@@ -611,10 +608,6 @@ def get_compact_subtitle(reader, width):
             
         icon_auto = f"{auto_scroll_icon}"
         
-        # Get UI mode display
-        ui_mode_names = ["MIN", "MED", "FULL", "SR"]
-        ui_mode_display = ui_mode_names[config.UI_MODE]
-        
         # Modified controls_text to remove ui_mode_text visual display but keep functionality
         controls_text = f"[{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {nav_text_1} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_UP}[/{COLORS.CONTROL_ICONS}] {nav_text_2} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_DOWN}[/{COLORS.CONTROL_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {page_text} [{COLORS.ARROW_ICONS}]{ICONS.ROW_NAVIGATION}[/{COLORS.ARROW_ICONS}] {scroll_text} [{COLORS.ARROW_ICONS}]{ICONS.PAGE_NAVIGATION}[/{COLORS.ARROW_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {quit_text} [{COLORS.QUIT_ICON}]{ICONS.QUIT}[/{COLORS.QUIT_ICON}]"
         
@@ -658,10 +651,6 @@ def get_compact_subtitle(reader, width):
             
         icon_auto = f"{auto_scroll_icon}"
         
-        # Get UI mode display
-        ui_mode_names = ["MIN", "MED", "FULL", "SR"]
-        ui_mode_display = ui_mode_names[config.UI_MODE]
-        
         # Modified controls_text to remove ui_mode_text visual display but keep functionality
         controls_text = f"[{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {nav_text_1} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_UP}[/{COLORS.CONTROL_ICONS}] {nav_text_2} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_DOWN}[/{COLORS.CONTROL_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {page_text} [{COLORS.ARROW_ICONS}]{ICONS.ROW_NAVIGATION}[/{COLORS.ARROW_ICONS}] {scroll_text} [{COLORS.ARROW_ICONS}]{ICONS.PAGE_NAVIGATION}[/{COLORS.ARROW_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {quit_text} [{COLORS.QUIT_ICON}]{ICONS.QUIT}[/{COLORS.QUIT_ICON}]"
         
@@ -704,10 +693,6 @@ def get_compact_subtitle(reader, width):
             icon_status = f"[{COLORS.CONTROL_KEYS}]{pause_key}[/{COLORS.CONTROL_KEYS}] {status_icon}"
             
         icon_auto = f"{auto_scroll_icon}"
-        
-        # Get UI mode display
-        ui_mode_names = ["MIN", "MED", "FULL", "SR"]
-        ui_mode_display = ui_mode_names[config.UI_MODE]
         
         # Modified controls_text to remove ui_mode_text visual display but keep functionality
         controls_text = f"[{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {nav_text_1} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_UP}[/{COLORS.CONTROL_ICONS}] {nav_text_2} [{COLORS.CONTROL_ICONS}]{ICONS.HIGHLIGHT_DOWN}[/{COLORS.CONTROL_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {page_text} [{COLORS.ARROW_ICONS}]{ICONS.ROW_NAVIGATION}[/{COLORS.ARROW_ICONS}] {scroll_text} [{COLORS.ARROW_ICONS}]{ICONS.PAGE_NAVIGATION}[/{COLORS.ARROW_ICONS}] [{COLORS.SEPARATORS}]{separator}[/{COLORS.SEPARATORS}] {quit_text} [{COLORS.QUIT_ICON}]{ICONS.QUIT}[/{COLORS.QUIT_ICON}]"
@@ -843,6 +828,110 @@ def render_chapter_index_overlay(reader, width, height):
 
     return panel, min(60, width - 4), panel_height
 
+
+def render_dictionary_overlay(reader, width, height):
+    """Render the in-app quick lookup panel (free dictionary sources)."""
+    panel_width = min(76, width - 4)
+    panel_height = min(22, height - 4)
+
+    body = Text(style=COLORS.TEXT_NORMAL)
+    lookup_word = reader.dictionary_lookup_word or "-"
+    body.append(f"Word: {lookup_word}\n\n", style="bold cyan")
+
+    if reader.dictionary_loading:
+        body.append("Looking up free dictionary sources...", style="yellow")
+    elif reader.dictionary_error:
+        body.append(reader.dictionary_error, style="bold red")
+    elif reader.dictionary_result:
+        result = reader.dictionary_result
+        if result.ipa:
+            body.append(f"IPA: {result.ipa}\n", style="bold magenta")
+        if result.translation_tr:
+            body.append(f"TR: {result.translation_tr}\n", style="bold green")
+        if result.meanings:
+            body.append("\n", style=COLORS.TEXT_NORMAL)
+            for idx, meaning in enumerate(result.meanings[:4], start=1):
+                body.append(f"{idx}. ", style="bold cyan")
+                if meaning.part_of_speech:
+                    body.append(f"[{meaning.part_of_speech}] ", style="bold yellow")
+                body.append(f"{meaning.definition}\n", style=COLORS.TEXT_NORMAL)
+                if meaning.example:
+                    body.append(f"   e.g. {meaning.example}\n", style="dim")
+        else:
+            body.append("No English definition found, but a translation may still be shown above.", style="yellow")
+    else:
+        body.append("No result.", style="dim")
+
+    footer = Text()
+    footer.append("d", style="bold white")
+    footer.append(" close", style="white")
+    footer.append("  ·  ", style="bright_blue")
+    footer.append("o", style="bold white")
+    footer.append(" pronounce", style="white")
+
+    panel = Panel(
+        Align.left(body),
+        title="[bold cyan]Quick Lookup[/bold cyan]",
+        subtitle=footer,
+        border_style="cyan",
+        box=box.ROUNDED,
+        width=panel_width,
+        height=panel_height,
+        padding=(1, 2),
+    )
+    return panel, panel_width, panel_height
+
+
+def render_word_history_overlay(reader, width, height):
+    """Render the word lookup history overlay (today's words + recent history)."""
+    panel_width = min(70, width - 4)
+    panel_height = min(24, height - 4)
+
+    today_words = word_history.get_today_words()
+    recent_words = word_history.get_recent_words(limit=15)
+
+    body = Text(style=COLORS.TEXT_NORMAL)
+
+    body.append("Today's words", style="bold cyan")
+    body.append(f"  ({len(today_words)})\n", style="dim")
+    if today_words:
+        for entry in today_words[:12]:
+            body.append("  • ", style="bright_blue")
+            body.append(entry.word, style="bold yellow")
+            if entry.count > 1:
+                body.append(f"  x{entry.count}", style="dim")
+            body.append("\n")
+    else:
+        body.append("  Nothing looked up yet today.\n", style="dim")
+
+    body.append("\nRecent lookups\n", style="bold cyan")
+    if recent_words:
+        for entry in recent_words:
+            body.append(f"  {entry.last_seen_date}  ", style="dim")
+            body.append(entry.word, style="bold yellow")
+            if entry.book:
+                body.append(f"  — {entry.book}", style="dim")
+            body.append("\n")
+    else:
+        body.append("  No lookup history yet.\n", style="dim")
+
+    footer = Text()
+    footer.append("e", style="bold white")
+    footer.append(" close", style="white")
+
+    panel = Panel(
+        Align.left(body),
+        title="[bold cyan]Word History[/bold cyan]",
+        subtitle=footer,
+        border_style="cyan",
+        box=box.ROUNDED,
+        width=panel_width,
+        height=panel_height,
+        padding=(1, 2),
+    )
+    return panel, panel_width, panel_height
+
+
 async def display_ui(reader):
     """Display the UI."""
     if reader.render_lock.locked():
@@ -865,7 +954,14 @@ async def display_ui(reader):
                 # Add recent menu state to trigger updates
                 reader.show_recent_menu, reader.recent_menu_selection_idx,
                 # Add chapter index state to trigger updates
-                reader.show_chapter_index, reader.chapter_index_selection_idx
+                reader.show_chapter_index, reader.chapter_index_selection_idx,
+                # Dictionary overlay state
+                reader.show_dictionary_overlay, reader.dictionary_loading,
+                reader.dictionary_lookup_word,
+                getattr(reader.dictionary_result, 'word', None) if reader.dictionary_result else None,
+                reader.dictionary_error,
+                # Word history overlay state
+                reader.show_word_history,
             )
             
             if reader.last_rendered_state == current_state and reader.last_terminal_size == (width, height):
@@ -882,6 +978,7 @@ async def display_ui(reader):
             temp_console = Console(width=width, height=height, force_terminal=True)
             
             book_output = ""
+            visible_lines = []
             
             if getattr(reader, 'speed_reading_enabled', False):
                 book_output = render_speed_reading_output(reader, width, height, temp_console)
@@ -1065,6 +1162,42 @@ async def display_ui(reader):
                 overlay = ""
                 for i, line in enumerate(chapter_lines):
                     if i >= panel_height: break
+                    overlay += f"\033[{start_y + i + 1};{start_x + 1}H{line}"
+
+                full_output += overlay
+
+            if reader.show_dictionary_overlay:
+                dictionary_panel, panel_width, panel_height = render_dictionary_overlay(reader, width, height)
+                with temp_console.capture() as capture:
+                    temp_console.print(dictionary_panel, end='', overflow='crop')
+                dictionary_output = capture.get()
+
+                dictionary_lines = dictionary_output.split('\n')
+                start_y = (height - panel_height) // 2
+                start_x = (width - panel_width) // 2
+
+                overlay = ""
+                for i, line in enumerate(dictionary_lines):
+                    if i >= panel_height:
+                        break
+                    overlay += f"\033[{start_y + i + 1};{start_x + 1}H{line}"
+
+                full_output += overlay
+
+            if reader.show_word_history:
+                history_panel, panel_width, panel_height = render_word_history_overlay(reader, width, height)
+                with temp_console.capture() as capture:
+                    temp_console.print(history_panel, end='', overflow='crop')
+                history_output = capture.get()
+
+                history_lines = history_output.split('\n')
+                start_y = (height - panel_height) // 2
+                start_x = (width - panel_width) // 2
+
+                overlay = ""
+                for i, line in enumerate(history_lines):
+                    if i >= panel_height:
+                        break
                     overlay += f"\033[{start_y + i + 1};{start_x + 1}H{line}"
 
                 full_output += overlay

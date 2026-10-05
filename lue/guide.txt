@@ -28,7 +28,12 @@ Chapter 6: Highlighting Controls
 There are two levels of text highlighting to help you follow along with the narration: sentence-level highlighting and word-level highlighting. To toggle sentence highlighting on or off, press the "s" key. To toggle word highlighting on or off, press the "w" key. You can use both highlighting modes simultaneously, or disable either one based on your preference.
 
 
-Chapter 7: Ending the Session
+Chapter 7: In-App Dictionary
+
+When you want a quick lookup without leaving Lue, press "d" to see the meaning, IPA, and Turkish translation of the current word in a panel. Press "o" to hear the word pronounced aloud using a neural text-to-speech voice, right inside the app.
+
+
+Chapter 8: Ending the Session
 
 When you are ready to stop reading, press "q" to quit. Your place and your reading mode will be saved automatically, so you can resume later without losing your spot.
 

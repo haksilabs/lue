@@ -27,12 +27,14 @@ DEFAULT_KEYBOARD_SHORTCUTS = {
         "decrease_speed": ",",
         "increase_speed": ".",
         "toggle_sentence_highlight": "s",
-        "toggle_word_highlight": "w"
+        "toggle_word_highlight": "w",
+        "pronounce_current_word": "o"
     },
     "display_controls": {
         "toggle_auto_scroll": "a",
         "cycle_ui_complexity": "v",
-        "toggle_chapter_index": "c"
+        "toggle_chapter_index": "c",
+        "toggle_dictionary": "d"
     },
     "application": {
         "quit": "q",
@@ -202,10 +204,17 @@ def _process_normal_key(reader, data):
         cmd = 'toggle_sentence_highlight'
     elif _matches_shortcut(data, tts_shortcuts.get("toggle_word_highlight", "w")):
         cmd = 'toggle_word_highlight'
+    elif _matches_shortcut(data, tts_shortcuts.get("pronounce_current_word", "o")):
+        cmd = 'pronounce_current_word'
     elif _matches_shortcut(data, display_shortcuts.get("cycle_ui_complexity", "v")):
         cmd = 'cycle_ui_complexity'
     elif _matches_shortcut(data, display_shortcuts.get("toggle_chapter_index", "c")):
         cmd = 'toggle_chapter_index'
+    elif _matches_shortcut(data, display_shortcuts.get("toggle_dictionary", "d")):
+        cmd = 'toggle_dictionary'
+    elif _matches_shortcut(data, display_shortcuts.get("toggle_word_history", "e")):
+        cmd = 'toggle_word_history'
+
 
     if cmd:
         reader.post_command(cmd)

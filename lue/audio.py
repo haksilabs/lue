@@ -8,6 +8,7 @@ from . import config, content_parser
 # This pattern is used to both clean text for TTS and detect sentence fragments.
 ABBREVIATION_PATTERN = r'\b(Mr|Mrs|Ms|Dr|Prof|Rev|Hon|Jr|Sr|Cpl|Sgt|Gen|Col|Capt|Lt|Pvt|vs|viz|Co|Inc|Ltd|Corp|St|Ave|Blvd)\.'
 INITIAL_PATTERN = r'\b([A-Z])\.(?=\s[A-Z])'
+QUOTE_CHARS = {'"', "“", "”", "‘", "’", "«", "»", "「", "」", "『", "』"}
 
 
 # Word mapping functionality moved to timing_calculator.py
@@ -37,6 +38,18 @@ def clean_tts_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     
     return text
+
+
+def _is_dialogue_sentence(text: str) -> bool:
+    """Heuristic check for dialogue-like lines that need gentler overlap."""
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped[0] in QUOTE_CHARS or stripped.startswith("- ") or stripped.startswith("— "):
+        return True
+    return any(ch in stripped for ch in QUOTE_CHARS)
 
 async def stop_and_clear_audio(reader):
     """Stop audio playback and clear the audio queue."""
@@ -188,7 +201,17 @@ async def _producer_loop(reader):
                     try:
                         timing_info = await reader.tts_model.generate_audio_with_timing(sanitized_text, output_filename)
                     except Exception as e:
-                        # If timing generation fails, fall back to generating without it
+                        # For rate-limit/concurrency errors, avoid sending an immediate
+                        # second request (which makes throttling worse). Let outer retry.
+                        error_text = str(e).lower()
+                        if (
+                            "concurrent_limit_exceeded" in error_text
+                            or "rate_limit" in error_text
+                            or "429" in error_text
+                        ):
+                            raise
+
+                        # If timing generation fails for other reasons, fall back to generating without it
                         logging.error(f"TTS timing generation failed for text '{original_text[:50]}...' (sanitized: '{sanitized_text[:50]}...'): {e}")
                         await reader.tts_model.generate_audio(sanitized_text, output_filename)
                 else:
@@ -346,8 +369,28 @@ async def _player_loop(reader):
                 
                 # Adjust duration for playback speed
                 actual_duration = duration / speed
-                
-                await asyncio.sleep(max(0.1, actual_duration - overlap_seconds))
+
+                # Keep overlap bounded so short lines don't get rushed.
+                effective_overlap = min(
+                    overlap_seconds,
+                    actual_duration * 0.35,
+                    max(0.0, actual_duration - 0.18),
+                )
+
+                is_dialogue = False
+                try:
+                    sentence_text = content_parser.split_into_sentences(reader.chapters[c][p])[s]
+                    is_dialogue = _is_dialogue_sentence(sentence_text)
+                except Exception:
+                    is_dialogue = False
+
+                # Dialogue lines sound more natural with less overlap and a tiny tail pause.
+                tail_pause = 0.0
+                if is_dialogue:
+                    effective_overlap = min(effective_overlap, actual_duration * 0.15, 0.08)
+                    tail_pause = min(0.22, max(0.08, 0.16 / max(speed, 1.0)))
+
+                await asyncio.sleep(max(0.1, actual_duration - effective_overlap + tail_pause))
                 reader.audio_queue.task_done()
             except asyncio.TimeoutError:
                 if not reader.running: break

@@ -19,12 +19,15 @@
     "decrease_speed": ",",
     "increase_speed": ".",
     "toggle_sentence_highlight": "s",
-    "toggle_word_highlight": "w"
+    "toggle_word_highlight": "w",
+    "pronounce_current_word": "o"
   },
   "display_controls": {
     "toggle_auto_scroll": "a",
     "cycle_ui_complexity": "v",
-    "toggle_chapter_index": "c"
+    "toggle_chapter_index": "c",
+    "toggle_dictionary": "d",
+    "toggle_word_history": "e"
   },
   "application": {
     "quit": "q",
