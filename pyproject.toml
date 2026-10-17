@@ -45,9 +45,9 @@ kokoro = [
 lue = "lue.__main__:cli"
 
 [project.urls]
-Homepage = "https://github.com/muhammetozkoc/lue"
-Repository = "https://github.com/muhammetozkoc/lue"
-Issues = "https://github.com/muhammetozkoc/lue/issues"
+Homepage = "https://github.com/haksilabs/lue"
+Repository = "https://github.com/haksilabs/lue"
+Issues = "https://github.com/haksilabs/lue/issues"
 
 [tool.setuptools.packages.find]
 include = ["lue*"]
