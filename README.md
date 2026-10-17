@@ -31,7 +31,7 @@ brew install ffmpeg
 Clone this fork to get the additional features. The `lue-reader` package on PyPI is the upstream version.
 
 ```bash
-git clone https://github.com/muhammetozkoc/lue.git
+git clone https://github.com/haksilabs/lue.git
 cd lue
 python3 -m venv .venv
 source .venv/bin/activate
